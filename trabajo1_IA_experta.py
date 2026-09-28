@@ -4,6 +4,8 @@ from rdflib.namespace import RDF, RDFS, XSD, FOAF, DCTERMS
 import random
 import re
 
+from trabajo1_IA_fuzzy import evaluar_perfil_difuso
+
 
 # Traducción de la ontología para traer los datos al sistema experto
 g = Graph()
@@ -156,19 +158,7 @@ class Propiedad(Fact):
 # Sistema experto
 
 class Akinator(KnowledgeEngine):
-    """ NO-LOOP MEDIANTE NEGACIÓN (NOT) 
-        # Esta regla exige como requisito que NO exista ya el AtributoEvaluado.
-        # Al declararlo dentro de la regla, la condición NOT se vuelve falsa y evita el ciclo infinito.
-        
-    @Rule(
-            AS.r << Respuesta(atributo=MATCH.attr),
-            NOT(AtributoEvaluado(nombre=MATCH.attr)),
-            salience=1
-        )
-        def registrar_historial_y_limpiar(self, r, attr):
-            self.declare(AtributoEvaluado(nombre=attr))
-            self.retract(r) # Limpiamos la respuesta de la memoria
-            """
+
     
     
     @Rule(EstadoJuego(fase="descarte"), 
@@ -198,64 +188,61 @@ class Akinator(KnowledgeEngine):
     # -Si no queda ningún personaje en la lista se imprimirá en pantalla que no pudo adivinar el personaje
     # -Si quedan 2 personajes entrar en fase de desempate utilizando el sistema difuso para desempatar 
     @Rule(EstadoJuego(fase="final", candidatos=MATCH.candidatos_restantes),
-          
            NOT(EstadoJuego(fase="desempate")),
            salience = 15)  # no-loop
     def decision_final(self, candidatos_restantes):
         if len(candidatos_restantes) == 1:
              cand = candidatos_restantes[0]
              print(f"\nEl motor determinó que es: {cand['uri'].upper()}")
-    
+
         elif len(candidatos_restantes) == 0:
             print("\nNo se encontró un personaje con estos atributos ")
-    
+
         elif len(candidatos_restantes) == 2:
              print(f"\nQuedan {len(candidatos_restantes)} candidatos. Activando lógica difusa...")
              self.declare(EstadoJuego(fase="desempate", candidatos=candidatos_restantes))
+             try:
+                       print("0-35: Débil (Humanos un poquito más poderosos)\n25-70: Medio poderoso (Armas avanzadas y sobrehumanos) \n60-100: Poderoso (Universal)")
+                       v_pod = float(input("¿Nivel de PODER (0 a 100)?: \n"))
+             
+                       print("\nPiense en amenaza como, si el personaje fuera(o es) malo , que tanta magnitud destruiría")
+                       print("0-3: Baja (Amenaza ciudades)\n3-7: Media (Amenaza el mundo)\n7-10: Alta (Amenaza el universo)")
+                       v_ame = float(input("¿Nivel de AMENAZA (0 a 10)?: \n"))
+             
+             
+                       print("\n0-30: Poco Popular \n30-70: Medio conocido \n70-100: ícono, muy conocido")
+                       v_pop = float(input("¿Nivel de POPULARIDAD (0 a 100)?: \n"))             
+                        #Se llama a la función evaluar_perfil_difuso y toma como parametros los valores ingresados por el usuario
+                        #y se declara un hecho PerfilDifuso con el valor desfuzzificado de impacto esperado, el cual será utilizado en la regla de desempate
+                       self.declare(PerfilDifuso(evaluar_perfil_difuso(v_pod, v_ame, v_pop)))
+             
+             
+             except ValueError:
+                    print("\nEntrada inválida. Ingresa solo números.")
              print(candidatos_restantes[0]["uri"])
              print(candidatos_restantes[1]["uri"
              ])
 
-    @Rule(EstadoJuego(fase="desempate", candidatos=MATCH.candidatos_restantes))
-    def desempate(self,candidatos_restantes):
-      try:
-          print("0-35: Débil (Humanos un poquito más poderosos)\n25-70: Medio poderoso (Armas avanzadas y sobrehumanos) \n60-100: Poderoso (Universal)")
-          v_pod = float(input("¿Nivel de PODER (0 a 100)?: \n"))
+    @Rule(EstadoJuego(fase="desempate", candidatos=MATCH.candidatos_restantes),
+          PerfilDifuso(impacto_esperado=MATCH.impacto_esperado))
+    def desempate(self,candidatos_restantes, impacto_esperado):
+        mejor_candidato = None
+        menor_dif = float('inf')
+        for cand in candidatos_restantes:
+            # Extraemos los valores del Fact de Experta
+            impacto_cand = evaluar_perfil_difuso(
+                cand['valorPoder'],
+                cand['valorAmenaza'],
+                cand['valorPopularidad']
+            )
 
-          print("\nPiense en amenaza como, si el personaje fuera(o es) malo , que tanta magnitud destruiría")
-          print("0-3: Baja (Amenaza ciudades)\n3-7: Media (Amenaza el mundo)\n7-10: Alta (Amenaza el universo)")
-          v_ame = float(input("¿Nivel de AMENAZA (0 a 10)?: \n"))
+            # El personaje que tenga la menor diferencia de impacto es el ganador
+            if abs(impacto_esperado - impacto_cand) < menor_dif:
+                menor_dif = abs(impacto_esperado - impacto_cand)
+                mejor_candidato = cand
 
-
-          print("\n0-30: Poco Popular \n30-70: Medio conocido \n70-100: ícono, muy conocido")
-          v_pop = float(input("¿Nivel de POPULARIDAD (0 a 100)?: \n"))
-
-
-          
-          # Se llama a la función evaluar_perfil_difuso y toma como parametros los valores ingresados por el usuario
-          impacto_esperado = evaluar_perfil_difuso(v_pod, v_ame, v_pop)
-          mejor_candidato = None
-          menor_dif = float('inf')
-
-          for cand in candidatos_restantes:
-              # Extraemos los valores del Fact de Experta
-              impacto_cand = evaluar_perfil_difuso(
-                  cand['valorPoder'],
-                  cand['valorAmenaza'],
-                  cand['valorPopularidad']
-              )
-
-              # El personaje que tenga la menor diferencia de impacto es el ganador
-              if abs(impacto_esperado - impacto_cand) < menor_dif:
-                  menor_dif = abs(impacto_esperado - impacto_cand)
-                  mejor_candidato = cand
-
-          if mejor_candidato:
-              print(f"\nLa Lógica Difusa desempató a favor de: {mejor_candidato['uri'].upper()}\n")
-
-      except ValueError:
-          print("\nEntrada inválida. Ingresa solo números.")
-
+        if mejor_candidato:
+            print(f"\nLa Lógica Difusa desempató a favor de: {mejor_candidato['uri'].upper()}\n")
 
 
 
